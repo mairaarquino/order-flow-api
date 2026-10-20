@@ -39,7 +39,11 @@ async function migrate(): Promise<void> {
         await client.query("COMMIT");
         console.log(`Applied migration ${filename}`);
       } catch (error) {
-        await client.query("ROLLBACK");
+        try {
+          await client.query("ROLLBACK");
+        } catch (rollbackError) {
+          console.error(`Failed to roll back migration ${filename}`, rollbackError);
+        }
         throw error;
       }
     }

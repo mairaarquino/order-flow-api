@@ -8,7 +8,7 @@ CREATE TABLE orders (
 
 CREATE TABLE payment_idempotency (
   idempotency_key text PRIMARY KEY,
-  order_id text NOT NULL,
+  order_id text NOT NULL REFERENCES orders (id),
   response jsonb,
   created_at timestamptz NOT NULL DEFAULT now()
 );

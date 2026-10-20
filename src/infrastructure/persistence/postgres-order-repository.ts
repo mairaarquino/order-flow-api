@@ -1,8 +1,11 @@
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
 import type { OrderItem, OrderStatus } from "../../domain/order.js";
 import { Order } from "../../domain/order.js";
-import type { OrderPaymentResult, PaymentRepository } from "../../application/ports/payment-repository.js";
-import { IdempotencyConflictError } from "../../application/ports/payment-repository.js";
+import {
+  IdempotencyConflictError,
+  type OrderPaymentResult,
+  type PaymentRepository,
+} from "../../application/ports/payment-repository.js";
 
 interface OrderRow extends QueryResultRow {
   id: string;
@@ -56,7 +59,7 @@ function resultFromJson(value: unknown): OrderPaymentResult {
     typeof order.createdAt !== "string" ||
     (order.status !== "pending_payment" && order.status !== "paid") ||
     !payment ||
-    typeof payment.approved !== "boolean" ||
+    (payment.status !== "approved" && payment.status !== "declined") ||
     typeof payment.transactionId !== "string"
   ) {
     throw new Error("Persisted idempotency response is invalid");
@@ -70,7 +73,7 @@ function resultFromJson(value: unknown): OrderPaymentResult {
       order.status,
     ),
     payment: {
-      approved: payment.approved,
+      status: payment.status,
       transactionId: payment.transactionId,
     },
   };
@@ -107,6 +110,19 @@ export class PostgresOrderRepository implements PaymentRepository {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
+      const orderResult = await client.query<OrderRow>(
+        `SELECT id, items, total_cents, status, created_at
+         FROM orders
+         WHERE id = $1
+         FOR UPDATE`,
+        [orderId],
+      );
+      const order = orderResult.rows[0] ? orderFromRow(orderResult.rows[0]) : null;
+      if (!order) {
+        await operation(null);
+        throw new Error("Payment operation must reject an order that does not exist");
+      }
+
       await client.query(
         `INSERT INTO payment_idempotency (idempotency_key, order_id)
          VALUES ($1, $2)
@@ -130,14 +146,6 @@ export class PostgresOrderRepository implements PaymentRepository {
         return replay;
       }
 
-      const orderResult = await client.query<OrderRow>(
-        `SELECT id, items, total_cents, status, created_at
-         FROM orders
-         WHERE id = $1
-         FOR UPDATE`,
-        [orderId],
-      );
-      const order = orderResult.rows[0] ? orderFromRow(orderResult.rows[0]) : null;
       const outcome = await operation(order);
 
       await this.saveInTransaction(client, outcome.order);
@@ -154,7 +162,11 @@ export class PostgresOrderRepository implements PaymentRepository {
       await client.query("COMMIT");
       return outcome;
     } catch (error) {
-      await client.query("ROLLBACK");
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollbackError) {
+        console.error("Failed to roll back payment transaction", rollbackError);
+      }
       throw error;
     } finally {
       client.release();

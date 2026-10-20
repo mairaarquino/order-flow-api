@@ -59,7 +59,13 @@ export class PayOrder {
       if (payment.approved) {
         order.markAsPaid();
       }
-      return { order, payment };
+      return {
+        order,
+        payment: {
+          status: payment.approved ? "approved" : "declined",
+          transactionId: payment.transactionId,
+        },
+      };
     });
   }
 }

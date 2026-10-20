@@ -1,10 +1,12 @@
 import type { Order } from "../../domain/order.js";
-import type { PaymentResult } from "./payment-gateway.js";
 import type { OrderRepository } from "./order-repository.js";
 
 export interface OrderPaymentResult {
   readonly order: Order;
-  readonly payment: PaymentResult;
+  readonly payment: {
+    readonly status: "approved" | "declined";
+    readonly transactionId: string;
+  };
 }
 
 export class IdempotencyConflictError extends Error {
