@@ -76,8 +76,8 @@ export class OrderController {
     }
   }
 
-  async pay(orderId: string): Promise<PaymentResponse> {
-    const result = await this.payOrder.execute(orderId);
+  async pay(orderId: string, idempotencyKey: string): Promise<PaymentResponse> {
+    const result = await this.payOrder.execute(orderId, idempotencyKey);
     return {
       order: {
         id: result.order.id,

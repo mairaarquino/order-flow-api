@@ -61,6 +61,25 @@ export class Order {
     return new Order(id, Object.freeze(validatedItems), totalCents, new Date(createdAt));
   }
 
+  static restore(
+    id: string,
+    items: readonly OrderItem[],
+    totalCents: number,
+    createdAt: Date,
+    status: OrderStatus,
+  ): Order {
+    const order = Order.create(id, items, createdAt);
+    if (order.totalCents !== totalCents) {
+      throw new OrderValidationError("Persisted order total does not match its items");
+    }
+    if (status === "paid") {
+      order.markAsPaid();
+    } else if (status !== "pending_payment") {
+      throw new OrderValidationError("Persisted order status is invalid");
+    }
+    return order;
+  }
+
   markAsPaid(): void {
     if (this.currentStatus !== "pending_payment") {
       throw new OrderValidationError("Only orders pending payment can be marked as paid");

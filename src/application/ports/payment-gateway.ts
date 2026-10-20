@@ -1,6 +1,7 @@
 export interface PaymentRequest {
   readonly orderId: string;
   readonly amountCents: number;
+  readonly idempotencyKey: string;
 }
 
 export interface PaymentResult {

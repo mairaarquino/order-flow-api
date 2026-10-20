@@ -1,5 +1,10 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { OrderAlreadyPaidError, OrderNotFoundError } from "../../application/use-cases/pay-order.js";
+import {
+  InvalidIdempotencyKeyError,
+  OrderAlreadyPaidError,
+  OrderNotFoundError,
+} from "../../application/use-cases/pay-order.js";
+import { IdempotencyConflictError } from "../../application/ports/payment-repository.js";
 import { InvalidRequestError, OrderController } from "./order-controller.js";
 
 const MAX_BODY_BYTES = 1_048_576;
@@ -39,12 +44,24 @@ export function createHttpServer(controller: OrderController): Server {
     const paymentRoute = request.url?.match(/^\/orders\/([^/]+)\/pay$/);
     if (request.method === "POST" && paymentRoute) {
       try {
+        const header = request.headers["idempotency-key"];
+        if (typeof header !== "string") {
+          throw new InvalidRequestError("Idempotency-Key header is required");
+        }
         const orderId = decodeURIComponent(paymentRoute[1]);
-        const result = await controller.pay(orderId);
+        const result = await controller.pay(orderId, header);
         sendJson(response, 200, result);
       } catch (error) {
+        if (error instanceof InvalidRequestError || error instanceof InvalidIdempotencyKeyError) {
+          sendJson(response, 400, { error: error.message });
+          return;
+        }
         if (error instanceof URIError) {
           sendJson(response, 400, { error: "Order id is not valid URL encoding" });
+          return;
+        }
+        if (error instanceof IdempotencyConflictError) {
+          sendJson(response, 409, { error: error.message });
           return;
         }
         if (error instanceof OrderNotFoundError) {

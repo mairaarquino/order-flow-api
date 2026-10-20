@@ -28,7 +28,7 @@ test("charges the persisted order total and marks an approved order as paid", as
     },
   };
 
-  const result = await new PayOrder(orders, gateway).execute(order.id);
+  const result = await new PayOrder(orders, gateway).execute(order.id, "pay-order-1");
 
   assert.equal(chargedOrderId, "order-1");
   assert.equal(chargedAmount, 2500);
@@ -46,7 +46,7 @@ test("leaves an order pending when payment is declined", async () => {
     processPayment: async () => ({ approved: false, transactionId: "sim-tx-declined" }),
   };
 
-  const result = await new PayOrder(orders, gateway).execute(order.id);
+  const result = await new PayOrder(orders, gateway).execute(order.id, "pay-order-declined");
 
   assert.equal(result.payment.status, "declined");
   assert.equal(result.order.status, "pending_payment");
@@ -60,10 +60,102 @@ test("rejects payment for missing and already-paid orders", async () => {
   };
   const payOrder = new PayOrder(orders, gateway);
 
-  await assert.rejects(payOrder.execute("missing"), OrderNotFoundError);
+  await assert.rejects(payOrder.execute("missing", "missing-order-key"), OrderNotFoundError);
 
   const order = makeOrder();
   order.markAsPaid();
   await orders.save(order);
-  await assert.rejects(payOrder.execute(order.id), OrderAlreadyPaidError);
+  await assert.rejects(payOrder.execute(order.id, "another-key"), OrderAlreadyPaidError);
+});
+
+test("replays a payment result for the same idempotency key without calling the gateway twice", async () => {
+  const orders = new InMemoryOrderRepository();
+  const order = makeOrder();
+  await orders.save(order);
+  let gatewayCalls = 0;
+  const gateway: PaymentGateway = {
+    processPayment: async () => {
+      gatewayCalls += 1;
+      return { approved: true, transactionId: "sim-tx-replay" };
+    },
+  };
+  const payOrder = new PayOrder(orders, gateway);
+
+  const first = await payOrder.execute(order.id, "same-key");
+  const replay = await payOrder.execute(order.id, "same-key");
+
+  assert.equal(gatewayCalls, 1);
+  assert.deepEqual(replay, first);
+});
+
+test("prevents concurrent payments from charging the same order more than once", async () => {
+  const orders = new InMemoryOrderRepository();
+  const order = makeOrder();
+  await orders.save(order);
+  let gatewayCalls = 0;
+  const gateway: PaymentGateway = {
+    processPayment: async () => {
+      gatewayCalls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return { approved: true, transactionId: "sim-tx-concurrent" };
+    },
+  };
+  const payOrder = new PayOrder(orders, gateway);
+
+  const results = await Promise.all([
+    payOrder.execute(order.id, "concurrent-key"),
+    payOrder.execute(order.id, "concurrent-key"),
+  ]);
+
+  assert.equal(gatewayCalls, 1);
+  assert.deepEqual(results[0], results[1]);
+});
+
+test("does not persist idempotency after a gateway failure and allows retry", async () => {
+  const orders = new InMemoryOrderRepository();
+  const order = makeOrder();
+  await orders.save(order);
+  let gatewayCalls = 0;
+  const gateway: PaymentGateway = {
+    processPayment: async () => {
+      gatewayCalls += 1;
+      if (gatewayCalls === 1) {
+        throw new Error("Gateway unavailable");
+      }
+      return { approved: true, transactionId: "sim-tx-retry" };
+    },
+  };
+  const payOrder = new PayOrder(orders, gateway);
+
+  await assert.rejects(payOrder.execute(order.id, "retry-key"), /Gateway unavailable/);
+  const retried = await payOrder.execute(order.id, "retry-key");
+
+  assert.equal(gatewayCalls, 2);
+  assert.equal(retried.payment.transactionId, "sim-tx-retry");
+  assert.equal(retried.order.status, "paid");
+});
+
+test("rejects reuse of an idempotency key for a different order", async () => {
+  const orders = new InMemoryOrderRepository();
+  const firstOrder = makeOrder();
+  const secondOrder = Order.create(
+    "order-2",
+    [{ productId: "product-2", quantity: 1, unitPriceCents: 100 }],
+    new Date("2026-10-20T12:00:00.000Z"),
+  );
+  await orders.save(firstOrder);
+  await orders.save(secondOrder);
+  const gateway: PaymentGateway = {
+    processPayment: async () => ({ approved: false, transactionId: "sim-tx-1" }),
+  };
+  const payOrder = new PayOrder(orders, gateway);
+
+  await payOrder.execute(firstOrder.id, "shared-key");
+  await assert.rejects(payOrder.execute(secondOrder.id, "shared-key"), /different order/);
+});
+
+test("rejects invalid state transitions in the domain", () => {
+  const order = makeOrder();
+  order.markAsPaid();
+  assert.throws(() => order.markAsPaid(), /Only orders pending payment/);
 });

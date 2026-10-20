@@ -1,6 +1,6 @@
 import type { Order } from "../../domain/order.js";
-import type { OrderRepository } from "../ports/order-repository.js";
 import type { PaymentGateway } from "../ports/payment-gateway.js";
+import type { OrderPaymentResult, PaymentRepository } from "../ports/payment-repository.js";
 
 export class OrderNotFoundError extends Error {
   constructor(orderId: string) {
@@ -16,6 +16,13 @@ export class OrderAlreadyPaidError extends Error {
   }
 }
 
+export class InvalidIdempotencyKeyError extends Error {
+  constructor() {
+    super("Idempotency-Key must contain between 1 and 200 characters");
+    this.name = "InvalidIdempotencyKeyError";
+  }
+}
+
 export interface PayOrderResult {
   readonly order: Order;
   readonly payment: {
@@ -26,35 +33,33 @@ export interface PayOrderResult {
 
 export class PayOrder {
   constructor(
-    private readonly orders: OrderRepository,
+    private readonly orders: PaymentRepository,
     private readonly paymentGateway: PaymentGateway,
   ) {}
 
-  async execute(orderId: string): Promise<PayOrderResult> {
-    const order = await this.orders.findById(orderId);
-    if (!order) {
-      throw new OrderNotFoundError(orderId);
+  async execute(orderId: string, idempotencyKey: string): Promise<PayOrderResult> {
+    const normalizedKey = idempotencyKey.trim();
+    if (normalizedKey.length === 0 || normalizedKey.length > 200) {
+      throw new InvalidIdempotencyKeyError();
     }
-    if (order.status === "paid") {
-      throw new OrderAlreadyPaidError(order.id);
-    }
+    return this.orders.executeIdempotently(orderId, normalizedKey, async (order): Promise<OrderPaymentResult> => {
+      if (!order) {
+        throw new OrderNotFoundError(orderId);
+      }
+      if (order.status === "paid") {
+        throw new OrderAlreadyPaidError(order.id);
+      }
 
-    const payment = await this.paymentGateway.processPayment({
-      orderId: order.id,
-      amountCents: order.totalCents,
+      const payment = await this.paymentGateway.processPayment({
+        orderId: order.id,
+        amountCents: order.totalCents,
+        idempotencyKey: `${order.id}:${normalizedKey}`,
+      });
+
+      if (payment.approved) {
+        order.markAsPaid();
+      }
+      return { order, payment };
     });
-
-    if (payment.approved) {
-      order.markAsPaid();
-      await this.orders.save(order);
-    }
-
-    return {
-      order,
-      payment: {
-        status: payment.approved ? "approved" : "declined",
-        transactionId: payment.transactionId,
-      },
-    };
   }
 }
