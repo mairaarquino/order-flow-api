@@ -27,6 +27,18 @@ A API escuta na porta `3000` por padrão. Para alterar, defina `PORT`. O Postgre
 
 ## Exemplos HTTP
 
+Verificar a disponibilidade da API:
+
+```sh
+curl -i http://localhost:3000/health
+```
+
+Resposta `200`:
+
+```json
+{"status":"ok"}
+```
+
 Criar um pedido (valores monetários em centavos inteiros):
 
 ```sh

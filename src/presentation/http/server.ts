@@ -41,6 +41,11 @@ function sendJson(response: ServerResponse, statusCode: number, body: unknown): 
 
 export function createHttpServer(controller: OrderController): Server {
   return createServer(async (request, response) => {
+    if (request.method === "GET" && request.url === "/health") {
+      sendJson(response, 200, { status: "ok" });
+      return;
+    }
+
     const paymentRoute = request.url?.match(/^\/orders\/([^/]+)\/pay$/);
     if (request.method === "POST" && paymentRoute) {
       try {

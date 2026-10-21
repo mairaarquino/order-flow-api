@@ -28,6 +28,10 @@ test("HTTP requires an idempotency key and replays successful payment responses"
 
   const address = server.address() as AddressInfo;
   const baseUrl = `http://127.0.0.1:${address.port}`;
+  const healthResponse = await fetch(`${baseUrl}/health`);
+  assert.equal(healthResponse.status, 200);
+  assert.deepEqual(await healthResponse.json(), { status: "ok" });
+
   const createdResponse = await fetch(`${baseUrl}/orders`, {
     method: "POST",
     headers: { "content-type": "application/json" },
