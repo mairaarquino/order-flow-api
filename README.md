@@ -1,6 +1,6 @@
 # OrderFlow API
 
-API TypeScript/Node.js com dependências direcionadas ao núcleo:
+API TypeScript/Node.js com Express, PostgreSQL e dependências direcionadas ao núcleo:
 
 - `src/domain`: entidade `Order`, invariantes e transições de estado.
 - `src/application`: casos de uso e contratos de persistência/pagamento.
@@ -24,6 +24,27 @@ npm start
 ```
 
 A API escuta na porta `3000` por padrão. Para alterar, defina `PORT`. O PostgreSQL local publica `5432` por padrão; se essa porta já estiver ocupada, defina `POSTGRES_PORT` e ajuste a porta no `DATABASE_URL`. O processo requer `DATABASE_URL`; as migrations são executadas explicitamente antes da inicialização e podem ser reaplicadas com segurança.
+
+### Executar com Docker
+
+Docker Compose inicia PostgreSQL e a API; o container da API aplica migrations antes de iniciar o servidor:
+
+```sh
+docker compose up --build -d
+docker compose ps
+curl -i http://localhost:3000/health
+```
+
+Para construir somente a imagem:
+
+```sh
+docker build -t order-flow-api .
+docker run --rm -p 3000:3000 \
+  -e DATABASE_URL=postgresql://orderflow:orderflow@host.docker.internal:5432/orderflow \
+  order-flow-api
+```
+
+O Dockerfile usa build multi-stage, instala apenas dependências de produção na imagem final, executa como usuário sem privilégios e inclui um healthcheck HTTP. Configure `DATABASE_URL` para um PostgreSQL acessível pelo container.
 
 ## Exemplos HTTP
 

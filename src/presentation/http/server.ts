@@ -1,4 +1,5 @@
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import express, { type ErrorRequestHandler, type Response } from "express";
+import { createServer, type Server } from "node:http";
 import {
   InvalidIdempotencyKeyError,
   OrderAlreadyPaidError,
@@ -7,98 +8,77 @@ import {
 import { IdempotencyConflictError } from "../../application/ports/payment-repository.js";
 import { InvalidRequestError, OrderController } from "./order-controller.js";
 
-const MAX_BODY_BYTES = 1_048_576;
+function sendError(response: Response, error: unknown, operation: string): void {
+  if (error instanceof InvalidRequestError || error instanceof InvalidIdempotencyKeyError) {
+    response.status(400).json({ error: error.message });
+    return;
+  }
+  if (error instanceof URIError) {
+    response.status(400).json({ error: "Order id is not valid URL encoding" });
+    return;
+  }
+  if (error instanceof IdempotencyConflictError || error instanceof OrderAlreadyPaidError) {
+    response.status(409).json({ error: error.message });
+    return;
+  }
+  if (error instanceof OrderNotFoundError) {
+    response.status(404).json({ error: error.message });
+    return;
+  }
 
-async function readJson(request: IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  let tooLarge = false;
+  console.error(`Failed to ${operation}`, error);
+  response.status(500).json({ error: "Internal server error" });
+}
 
-  for await (const chunk of request) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    size += buffer.length;
-    if (size > MAX_BODY_BYTES) {
-      tooLarge = true;
-    } else {
-      chunks.push(buffer);
+const bodyParserErrorHandler: ErrorRequestHandler = (error, _request, response, next) => {
+  if (typeof error === "object" && error !== null && "type" in error) {
+    const parserError = error as { type?: string };
+    if (parserError.type === "entity.parse.failed") {
+      response.status(400).json({ error: "Request body must be valid JSON" });
+      return;
+    }
+    if (parserError.type === "entity.too.large") {
+      response.status(413).json({ error: "Request body exceeds the 1 MiB limit" });
+      return;
     }
   }
-
-  if (tooLarge) {
-    throw new InvalidRequestError("Request body exceeds the 1 MiB limit");
-  }
-  try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
-  } catch {
-    throw new InvalidRequestError("Request body must be valid JSON");
-  }
-}
-
-function sendJson(response: ServerResponse, statusCode: number, body: unknown): void {
-  response.writeHead(statusCode, { "content-type": "application/json; charset=utf-8" });
-  response.end(JSON.stringify(body));
-}
+  next(error);
+};
 
 export function createHttpServer(controller: OrderController): Server {
-  return createServer(async (request, response) => {
-    if (request.method === "GET" && request.url === "/health") {
-      sendJson(response, 200, { status: "ok" });
-      return;
-    }
+  const app = express();
+  app.use(express.json({ limit: "1mb" }));
 
-    const paymentRoute = request.url?.match(/^\/orders\/([^/]+)\/pay$/);
-    if (request.method === "POST" && paymentRoute) {
-      try {
-        const header = request.headers["idempotency-key"];
-        if (typeof header !== "string") {
-          throw new InvalidRequestError("Idempotency-Key header is required");
-        }
-        const orderId = decodeURIComponent(paymentRoute[1]);
-        const result = await controller.pay(orderId, header);
-        sendJson(response, 200, result);
-      } catch (error) {
-        if (error instanceof InvalidRequestError || error instanceof InvalidIdempotencyKeyError) {
-          sendJson(response, 400, { error: error.message });
-          return;
-        }
-        if (error instanceof URIError) {
-          sendJson(response, 400, { error: "Order id is not valid URL encoding" });
-          return;
-        }
-        if (error instanceof IdempotencyConflictError) {
-          sendJson(response, 409, { error: error.message });
-          return;
-        }
-        if (error instanceof OrderNotFoundError) {
-          sendJson(response, 404, { error: error.message });
-          return;
-        }
-        if (error instanceof OrderAlreadyPaidError) {
-          sendJson(response, 409, { error: error.message });
-          return;
-        }
-        console.error("Failed to process order payment", error);
-        sendJson(response, 500, { error: "Internal server error" });
-      }
-      return;
-    }
+  app.get("/health", (_request, response) => {
+    response.status(200).json({ status: "ok" });
+  });
 
-    if (request.method !== "POST" || request.url !== "/orders") {
-      sendJson(response, 404, { error: "Not found" });
-      return;
-    }
-
+  app.post("/orders", async (request, response) => {
     try {
-      const body = await readJson(request);
-      const order = await controller.create(body);
-      sendJson(response, 201, order);
+      const order = await controller.create(request.body);
+      response.status(201).json(order);
     } catch (error) {
-      if (error instanceof InvalidRequestError) {
-        sendJson(response, 400, { error: error.message });
-        return;
-      }
-      console.error("Failed to create order", error);
-      sendJson(response, 500, { error: "Internal server error" });
+      sendError(response, error, "create order");
     }
   });
+
+  app.post("/orders/:id/pay", async (request, response) => {
+    try {
+      const header = request.headers["idempotency-key"];
+      if (typeof header !== "string") {
+        throw new InvalidRequestError("Idempotency-Key header is required");
+      }
+      const result = await controller.pay(request.params.id, header);
+      response.status(200).json(result);
+    } catch (error) {
+      sendError(response, error, "process order payment");
+    }
+  });
+
+  app.use(bodyParserErrorHandler);
+  app.use((_request, response) => {
+    response.status(404).json({ error: "Not found" });
+  });
+
+  return createServer(app);
 }
