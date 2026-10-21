@@ -1,5 +1,6 @@
 import { Pool } from "pg";
 import { CreateOrder } from "./application/use-cases/create-order.js";
+import { GetOrder } from "./application/use-cases/get-order.js";
 import { PayOrder } from "./application/use-cases/pay-order.js";
 import { UuidGenerator } from "./infrastructure/id/uuid-generator.js";
 import { SimulatedPaymentGateway } from "./infrastructure/payments/simulated-payment-gateway.js";
@@ -17,7 +18,8 @@ const ids = new UuidGenerator();
 const paymentGateway = new SimulatedPaymentGateway();
 const createOrder = new CreateOrder(orders, ids);
 const payOrder = new PayOrder(orders, paymentGateway);
-const controller = new OrderController(createOrder, payOrder);
+const getOrder = new GetOrder(orders);
+const controller = new OrderController(createOrder, payOrder, getOrder);
 const server = createHttpServer(controller);
 const port = Number(process.env.PORT ?? 3000);
 

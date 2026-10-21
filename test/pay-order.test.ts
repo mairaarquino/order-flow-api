@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Order } from "../src/domain/order.js";
-import { OrderAlreadyPaidError, OrderNotFoundError, PayOrder } from "../src/application/use-cases/pay-order.js";
+import { OrderAlreadyPaidError, PayOrder } from "../src/application/use-cases/pay-order.js";
+import { OrderNotFoundError } from "../src/application/use-cases/get-order.js";
 import type { PaymentGateway } from "../src/application/ports/payment-gateway.js";
 import { InMemoryOrderRepository } from "../src/infrastructure/persistence/in-memory-order-repository.js";
 

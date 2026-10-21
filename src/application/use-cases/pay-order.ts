@@ -1,13 +1,7 @@
 import type { Order } from "../../domain/order.js";
 import type { PaymentGateway } from "../ports/payment-gateway.js";
 import type { OrderPaymentResult, PaymentRepository } from "../ports/payment-repository.js";
-
-export class OrderNotFoundError extends Error {
-  constructor(orderId: string) {
-    super(`Order ${orderId} was not found`);
-    this.name = "OrderNotFoundError";
-  }
-}
+import { OrderNotFoundError } from "./get-order.js";
 
 export class OrderAlreadyPaidError extends Error {
   constructor(orderId: string) {

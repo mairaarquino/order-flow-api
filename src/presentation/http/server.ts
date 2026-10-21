@@ -3,8 +3,8 @@ import { createServer, type Server } from "node:http";
 import {
   InvalidIdempotencyKeyError,
   OrderAlreadyPaidError,
-  OrderNotFoundError,
 } from "../../application/use-cases/pay-order.js";
+import { OrderNotFoundError } from "../../application/use-cases/get-order.js";
 import { IdempotencyConflictError } from "../../application/ports/payment-repository.js";
 import { InvalidRequestError, OrderController } from "./order-controller.js";
 
@@ -59,6 +59,15 @@ export function createHttpServer(controller: OrderController): Server {
       response.status(201).json(order);
     } catch (error) {
       sendError(response, error, "create order");
+    }
+  });
+
+  app.get("/orders/:id", async (request, response) => {
+    try {
+      const order = await controller.getById(request.params.id);
+      response.status(200).json(order);
+    } catch (error) {
+      sendError(response, error, "get order");
     }
   });
 

@@ -1,4 +1,5 @@
 import { CreateOrder } from "../../application/use-cases/create-order.js";
+import { GetOrder } from "../../application/use-cases/get-order.js";
 import { PayOrder } from "../../application/use-cases/pay-order.js";
 import { OrderValidationError, type OrderItem } from "../../domain/order.js";
 
@@ -56,6 +57,7 @@ export class OrderController {
   constructor(
     private readonly createOrder: CreateOrder,
     private readonly payOrder: PayOrder,
+    private readonly getOrder: GetOrder,
   ) {}
 
   async create(body: unknown): Promise<OrderResponse> {
@@ -87,6 +89,17 @@ export class OrderController {
         status: result.order.status,
       },
       payment: result.payment,
+    };
+  }
+
+  async getById(orderId: string): Promise<OrderResponse> {
+    const order = await this.getOrder.execute(orderId);
+    return {
+      id: order.id,
+      items: order.items,
+      totalCents: order.totalCents,
+      createdAt: order.createdAt.toISOString(),
+      status: order.status,
     };
   }
 }

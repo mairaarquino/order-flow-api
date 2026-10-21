@@ -77,7 +77,13 @@ curl -i -X POST http://localhost:3000/orders/<order-id>/pay \
 
 Repetir exatamente a mesma requisição com a mesma chave reproduz o resultado original sem chamar novamente o gateway. Reutilizar a chave para outro pedido retorna `409`; usar uma chave nova para um pedido já pago também retorna `409`. Um pedido inexistente retorna `404`, e a ausência de `Idempotency-Key` retorna `400`.
 
-O gateway incluído é simulado e aprova pagamentos. Para uma integração real, o provedor deve aceitar e respeitar a chave de idempotência recebida.
+Consultar um pedido por ID:
+
+```sh
+curl -i http://localhost:3000/orders/<order-id>
+```
+
+Retorna `200` e o pedido persistido ou `404` quando o ID não existe. O gateway incluído é simulado e aprova pagamentos. Para uma integração real, o provedor deve aceitar e respeitar a chave de idempotência recebida.
 
 ## Testes
 

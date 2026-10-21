@@ -3,6 +3,7 @@ import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
 import { CreateOrder } from "../src/application/use-cases/create-order.js";
+import { GetOrder } from "../src/application/use-cases/get-order.js";
 import { PayOrder } from "../src/application/use-cases/pay-order.js";
 import { InMemoryOrderRepository } from "../src/infrastructure/persistence/in-memory-order-repository.js";
 import { OrderController } from "../src/presentation/http/order-controller.js";
@@ -18,7 +19,7 @@ test("HTTP requires an idempotency key and replays successful payment responses"
       return { approved: true, transactionId: "http-transaction" };
     },
   });
-  const server = createHttpServer(new OrderController(createOrder, payOrder));
+  const server = createHttpServer(new OrderController(createOrder, payOrder, new GetOrder(orders)));
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   t.after(async () => {
@@ -40,6 +41,13 @@ test("HTTP requires an idempotency key and replays successful payment responses"
   const created = await createdResponse.json() as { id: string; status: string };
   assert.equal(createdResponse.status, 201);
   assert.equal(created.status, "pending_payment");
+
+  const fetchedResponse = await fetch(`${baseUrl}/orders/${created.id}`);
+  assert.equal(fetchedResponse.status, 200);
+  assert.deepEqual(await fetchedResponse.json(), created);
+
+  const missingOrderResponse = await fetch(`${baseUrl}/orders/missing-order`);
+  assert.equal(missingOrderResponse.status, 404);
 
   const missingKeyResponse = await fetch(`${baseUrl}/orders/${created.id}/pay`, { method: "POST" });
   assert.equal(missingKeyResponse.status, 400);
